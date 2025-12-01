@@ -1,3 +1,3 @@
-from enviornment import WumpusEnv
+from enviornment import WumpusEnv, load_img
 
 env = WumpusEnv(...)

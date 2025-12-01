@@ -181,7 +181,7 @@ def main():
         "exit": load_img(exit_img, ASSET_SIZE),
     }
 
-    env = WumpusEnv(w=8, h=8, n_pits=6, n_wumpus=3, seed=123, wumpus_orientation="random")
+    env = WumpusEnv(w=8, h=8, n_pits=6, n_wumpus=3, seed=123, wumpus_orientation="down")
     W, H = env.w * CELL, env.h * CELL + 40
     screen = pygame.display.set_mode((W, H))
     clock = pygame.time.Clock()
@@ -203,12 +203,15 @@ def main():
                     continue
                 if env.done:
                     continue
+
                 keymap = {pygame.K_UP: 0, pygame.K_w: 0, pygame.K_DOWN: 1, pygame.K_s: 1, pygame.K_LEFT: 2, pygame.K_a: 2, pygame.K_RIGHT: 3, pygame.K_d: 3}
                 if e.key in keymap:
                     a = keymap[e.key]
                     reward, done = env.step(a)
+
                     env.render(screen, CELL, assets)
                     pygame.display.flip()
+
                     if done:
                         overlay = pygame.Surface((W, H), pygame.SRCALPHA)
                         overlay.fill((0, 0, 0, 160))
