@@ -1,14 +1,3 @@
-"""
-A simplified, more readable, less human-like BFS agent
-with risk filtering for Wumpus World.
-
-Behavioral properties:
-- Deterministic decision structure
-- Minimal heuristic reasoning
-- Consistent rule-based risk evaluation
-- No psychologically human-like "intuition"
-"""
-
 from collections import deque
 
 class WumpusBFS:
@@ -71,21 +60,23 @@ class WumpusBFS:
         # Pit reasoning
         for nbr in self.neighbors(agent):
             if not breeze:
-                # Breeze absent → neighbor not a pit
                 self.safe.add(nbr)
                 self.possible_pit_count.pop(nbr, None)
             else:
-                # Breeze present → neighbor may be pit
                 if nbr not in self.visited:
                     self.possible_pit_count[nbr] = self.possible_pit_count.get(nbr, 0) + 1
 
-        # Wumpus reasoning
-        for nbr in self.neighbors(agent):
-            if not stench:
-                # No stench → likely no Wumpus
+        # -------------- WUMPUS REASONING ----------------------
+        # If no stench, all neighbors cannot have a Wumpus.
+        if not stench:
+            for nbr in self.neighbors(agent):
+                if nbr in self.confirmed_wumpus:
+                    self.confirmed_wumpus.remove(nbr)
                 self.confirmed_no_wumpus.add(nbr)
                 self.possible_wumpus_count.pop(nbr, None)
-            else:
+        else:
+            # Stench present: neighbors might contain a wumpus
+            for nbr in self.neighbors(agent):
                 if nbr not in self.visited:
                     self.possible_wumpus_count[nbr] = self.possible_wumpus_count.get(nbr, 0) + 1
 
@@ -95,13 +86,12 @@ class WumpusBFS:
                 self.confirmed_wumpus.add(tile)
 
     # -----------------------------------------------------------
-    # Risk estimation (simple procedural model, not human-like)
+    # Risk estimation
     # -----------------------------------------------------------
     def pit_probability(self, tile):
         if tile in self.safe or tile in self.visited:
             return 0.0
         cnt = self.possible_pit_count.get(tile, 0)
-        # Linearized risk model for readability
         return min(0.25 * cnt, 0.90)
 
     def wumpus_probability(self, tile):
@@ -116,7 +106,7 @@ class WumpusBFS:
         return max(self.pit_probability(tile), self.wumpus_probability(tile))
 
     # -----------------------------------------------------------
-    # BFS path computation with risk filtering
+    # BFS path with risk filtering
     # -----------------------------------------------------------
     def bfs_path(self, start, goal, max_risk):
         queue = deque([start])
@@ -146,7 +136,7 @@ class WumpusBFS:
         return list(reversed(path))
 
     # -----------------------------------------------------------
-    # Convert movement to action IDs
+    # Movement action conversion
     # -----------------------------------------------------------
     def movement_action(self, a, b):
         (r1, c1), (r2, c2) = a, b
@@ -165,13 +155,13 @@ class WumpusBFS:
 
         # same column
         if ar[1] == wr[1]:
-            if wr[0] < ar[0]: return 4  # UP
-            if wr[0] > ar[0]: return 5  # DOWN
+            if wr[0] < ar[0]: return 4  # SHOOT UP
+            if wr[0] > ar[0]: return 5  # SHOOT DOWN
 
         # same row
         if ar[0] == wr[0]:
-            if wr[1] < ar[1]: return 6  # LEFT
-            if wr[1] > ar[1]: return 7  # RIGHT
+            if wr[1] < ar[1]: return 6  # SHOOT LEFT
+            if wr[1] > ar[1]: return 7  # SHOOT RIGHT
 
         return None
 
@@ -188,16 +178,16 @@ class WumpusBFS:
         arrows = state["arrows_remaining"]
 
         # -----------------------------
-        # 1. Shooting option (rule-based)
+        # Shooting rule
         # -----------------------------
         if arrows > 0 and self.confirmed_wumpus:
-            for wpos in self.confirmed_wumpus:
+            for wpos in list(self.confirmed_wumpus):
                 act = self.shooting_action(wpos, agent)
                 if act is not None:
                     return act
 
         # -----------------------------
-        # 2. Goal determination
+        # Goal selection
         # -----------------------------
         if not have_gold and gold_pos is not None:
             goal = gold_pos
@@ -207,7 +197,7 @@ class WumpusBFS:
             goal = None
 
         # -----------------------------
-        # 3. Try safe BFS plan
+        # Try safe BFS plan
         # -----------------------------
         if goal is not None:
             path = self.bfs_path(agent, goal, self.risk_threshold)
@@ -215,20 +205,19 @@ class WumpusBFS:
                 return self.movement_action(path[0], path[1])
 
         # -----------------------------
-        # 4. Relax safety requirements (machine-like fallback)
+        # Relax safety constraints
         # -----------------------------
-        relax_levels = [self.risk_threshold, 0.30, 0.60, 1.0]
-        for thr in relax_levels:
+        for thr in [self.risk_threshold, 0.30, 0.60, 1.0]:
             if goal is not None:
                 path = self.bfs_path(agent, goal, thr)
                 if path:
                     return self.movement_action(path[0], path[1])
 
         # -----------------------------
-        # 5. Exploration: choose neighbor with minimal risk
+        # Exploration fallback
         # -----------------------------
         best_tile = None
-        best_risk = 999.0
+        best_risk = 999
 
         for nbr in self.neighbors(agent):
             risk = self.death_probability(nbr)
