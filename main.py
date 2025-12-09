@@ -61,7 +61,7 @@ class WumpusGame:
 
         # Auto-play settings (for AI agents)
         self.auto_play = False
-        self.step_delay = 300
+        self.step_delay = 50
         self.last_step_time = 0
 
         # Statistics

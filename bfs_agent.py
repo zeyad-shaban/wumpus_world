@@ -23,6 +23,12 @@ class WumpusBFS:
         self.possible_wumpus_count = {}   # {tile: int}
         self.confirmed_wumpus = set()
         self.confirmed_no_wumpus = set()
+        
+        # Track tiles that have already contributed percepts
+        self.percepts_processed = set()
+        
+        # Track wumpus count to detect kills
+        self.last_wumpus_count = len(env.get_state()["wumpus"])
 
         # Update KB at initial tile
         self._update_knowledge()
@@ -43,16 +49,66 @@ class WumpusBFS:
                 yield np
 
     # -----------------------------------------------------------
+    # Recalculate after wumpus kill
+    # -----------------------------------------------------------
+    def _recalculate_wumpus_knowledge(self):
+        """Clear and recalculate wumpus-related knowledge after a kill"""
+        # Clear all wumpus knowledge
+        self.possible_wumpus_count.clear()
+        self.confirmed_wumpus.clear()
+        self.confirmed_no_wumpus.clear()
+        
+        # Re-process all visited tiles for wumpus info only
+        for tile in list(self.percepts_processed):
+            # Temporarily move agent to recalculate (save current)
+            state = self.env.get_state()
+            
+            # Check neighbors of this visited tile against current wumpus positions
+            wumpus_positions = set(state["wumpus"])
+            
+            # Check if any neighbor has a wumpus (for stench)
+            has_stench = any(
+                nbr in wumpus_positions 
+                for nbr in self.neighbors(tile)
+            )
+            
+            if not has_stench:
+                # No stench means no wumpus nearby
+                for nbr in self.neighbors(tile):
+                    self.confirmed_no_wumpus.add(nbr)
+            else:
+                # Stench present: neighbors might have wumpus
+                for nbr in self.neighbors(tile):
+                    if nbr not in self.visited:
+                        self.possible_wumpus_count[nbr] = self.possible_wumpus_count.get(nbr, 0) + 1
+        
+        # Deduce high-confidence wumpus
+        for tile, cnt in list(self.possible_wumpus_count.items()):
+            if tile not in self.confirmed_no_wumpus and cnt >= 2:
+                self.confirmed_wumpus.add(tile)
+
+    # -----------------------------------------------------------
     # Percept-driven KB update
     # -----------------------------------------------------------
     def _update_knowledge(self):
         state = self.env.get_state()
         agent = state["agent"]
         percepts = self.env.get_percepts()
+        
+        # Check if a wumpus was killed (count decreased)
+        current_wumpus_count = len(state["wumpus"])
+        if current_wumpus_count < self.last_wumpus_count:
+            self._recalculate_wumpus_knowledge()
+        self.last_wumpus_count = current_wumpus_count
 
         # Mark visited / safe
         self.visited.add(agent)
         self.safe.add(agent)
+
+        # Only process percepts from this tile once
+        if agent in self.percepts_processed:
+            return
+        self.percepts_processed.add(agent)
 
         breeze = percepts.get("breeze", False)
         stench = percepts.get("stench", False)
