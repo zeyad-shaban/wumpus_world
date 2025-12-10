@@ -206,6 +206,7 @@ def main():
 
 
                 #this is the action mapping for player can be replaced with an AI agent in mazens case it will be genetic algorithm
+
                 keymap = {pygame.K_UP: 0, pygame.K_w: 0, pygame.K_DOWN: 1, pygame.K_s: 1, pygame.K_LEFT: 2, pygame.K_a: 2, pygame.K_RIGHT: 3, pygame.K_d: 3}
                 if e.key in keymap:
                     a = keymap[e.key]
