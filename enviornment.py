@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from glob import glob
 import cv2
+from genetic_algo import GeneticcAlgorithm
 
 
 def pick_player():
@@ -22,25 +23,50 @@ class WumpusEnv:
         self.w, self.h, self.n_pits, self.n_wumpus = w, h, n_pits, n_wumpus
         self.rng = random.Random(seed)
         self.wumpus_orientation = wumpus_orientation
-        self.reset()
+        
+        # Store initial map configuration
+        self.initial_agent = None
+        self.initial_gold = None
+        self.initial_wumpuses = []
+        self.initial_pits = set()
+        self.initial_exit = None
+        
+        self.generate_new_map()
 
-    def reset(self):
+    def generate_new_map(self):
+        """Generate a completely new map layout"""
         cells = [(r, c) for r in range(self.h) for c in range(self.w)]
         self.rng.shuffle(cells)
         it = iter(cells)
-        self.agent = next(it)
-        self.gold = next(it)
+        
+        # Generate new positions
+        self.initial_agent = next(it)
+        self.initial_gold = next(it)
+        
         # place multiple wumpuses (each is (pos, facing))
-        self.wumpuses = []
+        self.initial_wumpuses = []
         for _ in range(self.n_wumpus):
             pos = next(it)
             if self.wumpus_orientation == "random":
                 facing = self.rng.choice(["up", "down", "left", "right"])
             else:
                 facing = self.wumpus_orientation
-            self.wumpuses.append((pos, facing))
-        self.pits = {next(it) for _ in range(self.n_pits)}
-        self.exit = next(it)
+            self.initial_wumpuses.append((pos, facing))
+        
+        self.initial_pits = {next(it) for _ in range(self.n_pits)}
+        self.initial_exit = next(it)
+        
+        # Now reset to use this map
+        self.reset()
+        return self.get_state()
+
+    def reset(self):
+        """Reset agent to starting position on the SAME map"""
+        self.agent = self.initial_agent
+        self.gold = self.initial_gold
+        self.wumpuses = list(self.initial_wumpuses)  # copy the list
+        self.pits = set(self.initial_pits)  # copy the set
+        self.exit = self.initial_exit
         self.have_gold = False
         self.done = False
         self.total = 0
@@ -167,7 +193,6 @@ def load_img(path, size):
     surf = pygame.image.frombuffer(canvas.tobytes(), (target_w, target_h), "RGBA")
     return surf
 
-
 def main():
     pygame.init()
     CELL = 64
@@ -181,51 +206,173 @@ def main():
         "exit": load_img(exit_img, ASSET_SIZE),
     }
 
+    # Ask user for mode
+    print("=" * 50)
+    print("WUMPUS WORLD")
+    print("=" * 50)
+    print("Choose mode:")
+    print("  1. Manual control (arrow keys)")
+    print("  2. Algorithm control (watch AI play)")
+    mode = input("Enter 1 or 2: ").strip()
+    
+    if mode == "2":
+        manual_mode = False
+        print("\nAlgorithm mode selected!")
+        print("Generating random chromosome...")
+    else:
+        manual_mode = True
+        print("\nManual mode selected!")
+
     env = WumpusEnv(w=8, h=8, n_pits=6, n_wumpus=3, seed=123, wumpus_orientation="down")
     W, H = env.w * CELL, env.h * CELL + 40
     screen = pygame.display.set_mode((W, H))
     clock = pygame.time.Clock()
 
+    
+    if not manual_mode:
+        # Create genetic algorithm instance
+        ga = GeneticcAlgorithm(env, max_moves=50)
+        
+        # Generate one chromosome for testing
+        current_chromosome = ga.random_chromosome()
+        current_actions = []
+        action_index = 0
+
+        current_actions = ga.chromosome_to_actions(current_chromosome)
+        print(f"Chromosome: {current_chromosome[:30]}...")  # print first 30 moves
+        print(f"Total moves in chromosome: {len(current_chromosome)}")
+        print("\nControls:")
+        print("  SPACE - Execute next move")
+        print("  A - Auto-play (watch full sequence)")
+        print("  R - Reset")
+        print("  N - New map + new chromosome")
+
     env.render(screen, CELL, assets)
     pygame.display.flip()
 
+    if manual_mode:
+        print("\nManual Controls:")
+        print("  Arrow keys / WASD - Move")
+        print("  R - Reset (same map)")
+        print("  N - New map")
+    
+    auto_play = False  # for algorithm mode - auto execute moves
+    
     while True:
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+            
             if e.type == pygame.KEYDOWN:
+                # R key - reset to starting position on SAME map
                 if e.key == pygame.K_r:
                     env.reset()
+                    action_index = 0  # reset action counter
+                    auto_play = False
+                    env.render(screen, CELL, assets)
+                    pygame.display.flip()
+                    print("Map reset to starting position")
+                    continue
+                
+                # N key - generate completely NEW map
+                if e.key == pygame.K_n:
+                    env.generate_new_map()
                     assets["player"] = load_img(pick_player(), ASSET_SIZE)
+                    action_index = 0
+                    auto_play = False
+                    
+                    # Generate new chromosome for algorithm mode
+                    if not manual_mode:
+                        current_chromosome = ga.random_chromosome()
+                        current_actions = ga.chromosome_to_actions(current_chromosome)
+                        print(f"\nNew chromosome: {current_chromosome[:30]}...")
+                        print(f"Total moves: {len(current_chromosome)}")
+                    
                     env.render(screen, CELL, assets)
                     pygame.display.flip()
+                    print("New map generated!")
                     continue
-                if env.done:
-                    continue
+                
+                # ALGORITHM MODE CONTROLS
+                if not manual_mode:
+                    # SPACE - execute next move from chromosome
+                    if e.key == pygame.K_SPACE:
+                        if not env.done and action_index < len(current_actions):
+                            action = current_actions[action_index]
+                            reward, done = env.step(action)
+                            action_index += 1
+                            
+                            move_name = ['UP', 'DOWN', 'LEFT', 'RIGHT'][action]
+                            print(f"Move {action_index}: {move_name} | Reward: {reward} | Total: {env.total}")
+                            
+                            env.render(screen, CELL, assets)
+                            pygame.display.flip()
+                            
+                            if done:
+                                result = "WON!" if reward > 0 else "DIED"
+                                print(f"\n{result} Final score: {env.total}")
+                        else:
+                            print("Chromosome finished or game over!")
+                    
+                    # A - auto-play mode
+                    if e.key == pygame.K_a:
+                        auto_play = not auto_play
+                        if auto_play:
+                            print("Auto-play enabled! Watching AI...")
+                        else:
+                            print("Auto-play disabled")
+                
+                # MANUAL MODE CONTROLS
+                else:
+                    if env.done:
+                        continue
 
+                    # Movement controls
+                    keymap = {
+                        pygame.K_UP: 0, pygame.K_w: 0, 
+                        pygame.K_DOWN: 1, pygame.K_s: 1, 
+                        pygame.K_LEFT: 2, pygame.K_a: 2, 
+                        pygame.K_RIGHT: 3, pygame.K_d: 3
+                    }
+                    if e.key in keymap:
+                        a = keymap[e.key]
+                        reward, done = env.step(a)
 
-                #this is the action mapping for player can be replaced with an AI agent in mazens case it will be genetic algorithm
-
-                keymap = {pygame.K_UP: 0, pygame.K_w: 0, pygame.K_DOWN: 1, pygame.K_s: 1, pygame.K_LEFT: 2, pygame.K_a: 2, pygame.K_RIGHT: 3, pygame.K_d: 3}
-                if e.key in keymap:
-                    a = keymap[e.key]
-                    reward, done = env.step(a)
-
-                    env.render(screen, CELL, assets)
-                    pygame.display.flip()
-
-                    if done:
-                        overlay = pygame.Surface((W, H), pygame.SRCALPHA)
-                        overlay.fill((0, 0, 0, 160))
-                        screen.blit(overlay, (0, 0))
-                        font = pygame.font.SysFont(None, 36)
-                        msg = "You won!" if reward > 0 else "You died!"
-                        text = font.render(msg + "  (R to restart)", True, (255, 255, 255))
-                        screen.blit(text, text.get_rect(center=(W // 2, H // 2)))
+                        env.render(screen, CELL, assets)
                         pygame.display.flip()
-        clock.tick(30)
 
+                        if done:
+                            overlay = pygame.Surface((W, H), pygame.SRCALPHA)
+                            overlay.fill((0, 0, 0, 160))
+                            screen.blit(overlay, (0, 0))
+                            font = pygame.font.SysFont(None, 36)
+                            msg = "You won!" if reward > 0 else "You died!"
+                            text = font.render(msg + "  (R to restart / N for new map)", True, (255, 255, 255))
+                            screen.blit(text, text.get_rect(center=(W // 2, H // 2)))
+                            pygame.display.flip()
+        
+        # Auto-play logic for algorithm mode
+        if not manual_mode and auto_play and not env.done and action_index < len(current_actions):
+            action = current_actions[action_index]
+            reward, done = env.step(action)
+            action_index += 1
+            
+            move_name = ['UP', 'DOWN', 'LEFT', 'RIGHT'][action]
+            print(f"Move {action_index}: {move_name} | Reward: {reward} | Total: {env.total}")
+            
+            env.render(screen, CELL, assets)
+            pygame.display.flip()
+            
+            if done:
+                result = "WON!" if reward > 0 else "DIED"
+                print(f"\n{result} Final score: {env.total}")
+                auto_play = False
+            
+            # Small delay so you can see the moves
+            pygame.time.delay(200)  # 200ms between moves
+        
+        clock.tick(30)
 
 if __name__ == "__main__":
     main()
