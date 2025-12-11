@@ -213,14 +213,22 @@ def main():
     print("Choose mode:")
     print("  1. Manual control (arrow keys)")
     print("  2. Algorithm control (watch AI play)")
-    mode = input("Enter 1 or 2: ").strip()
+    print("  3. Watch Evolution (see GA evolve & play best path)")
+    mode = input("Enter 1, 2, or 3: ").strip()
     
     if mode == "2":
         manual_mode = False
+        evolution_mode = False
         print("\nAlgorithm mode selected!")
         print("Generating random chromosome...")
+    elif mode == "3":
+        manual_mode = False
+        evolution_mode = True
+        print("\nEvolution mode selected!")
+        print("Watch the genetic algorithm evolve and find the best path!")
     else:
         manual_mode = True
+        evolution_mode = False
         print("\nManual mode selected!")
 
     env = WumpusEnv(w=8, h=8, n_pits=6, n_wumpus=3, seed=123, wumpus_orientation="down")
@@ -228,24 +236,40 @@ def main():
     screen = pygame.display.set_mode((W, H))
     clock = pygame.time.Clock()
 
+    # Variables for evolution mode
+    evolution_phase = "idle"  # "idle", "evolving", "showing_best"
+    ga = None
+    current_chromosome = None
+    current_actions = []
+    action_index = 0
+    evolution_speed = 10  # generations per frame during fast evolution
     
     if not manual_mode:
         # Create genetic algorithm instance
-        ga = GeneticcAlgorithm(env, max_moves=50)
+        ga = GeneticcAlgorithm(env, max_moves=50, population_size=50, generations=100, mutation_rate=0.1)
         
-        # Generate one chromosome for testing
-        current_chromosome = ga.random_chromosome()
-        current_actions = []
-        action_index = 0
-
-        current_actions = ga.chromosome_to_actions(current_chromosome)
-        print(f"Chromosome: {current_chromosome[:30]}...")  # print first 30 moves
-        print(f"Total moves in chromosome: {len(current_chromosome)}")
-        print("\nControls:")
-        print("  SPACE - Execute next move")
-        print("  A - Auto-play (watch full sequence)")
-        print("  R - Reset")
-        print("  N - New map + new chromosome")
+        if evolution_mode:
+            # Start evolution
+            ga.start()
+            evolution_phase = "evolving"
+            print("\nEvolution started!")
+            print("Controls:")
+            print("  SPACE - Pause/Resume evolution")
+            print("  F - Toggle fast mode (skip visualization)")
+            print("  R - Restart evolution")
+            print("  N - New map + restart evolution")
+            print("\nWatch as the algorithm finds the best path...")
+        else:
+            # Generate one chromosome for testing (mode 2)
+            current_chromosome = ga.random_chromosome()
+            current_actions = ga.chromosome_to_actions(current_chromosome)
+            print(f"Chromosome: {current_chromosome[:30]}...")  # print first 30 moves
+            print(f"Total moves in chromosome: {len(current_chromosome)}")
+            print("\nControls:")
+            print("  SPACE - Execute next move")
+            print("  A - Auto-play (watch full sequence)")
+            print("  R - Reset")
+            print("  N - New map + new chromosome")
 
     env.render(screen, CELL, assets)
     pygame.display.flip()
@@ -257,6 +281,8 @@ def main():
         print("  N - New map")
     
     auto_play = False  # for algorithm mode - auto execute moves
+    fast_mode = False  # for evolution mode - skip visualization during evolution
+    paused = False  # for evolution mode - pause evolution
     
     while True:
         for e in pygame.event.get():
@@ -265,11 +291,19 @@ def main():
                 sys.exit()
             
             if e.type == pygame.KEYDOWN:
-                # R key - reset to starting position on SAME map
+                # R key - reset/restart
                 if e.key == pygame.K_r:
                     env.reset()
-                    action_index = 0  # reset action counter
+                    action_index = 0
                     auto_play = False
+                    
+                    if evolution_mode:
+                        # Restart evolution
+                        ga.start()
+                        evolution_phase = "evolving"
+                        paused = False
+                        print("\nEvolution restarted!")
+                    
                     env.render(screen, CELL, assets)
                     pygame.display.flip()
                     print("Map reset to starting position")
@@ -282,8 +316,14 @@ def main():
                     action_index = 0
                     auto_play = False
                     
-                    # Generate new chromosome for algorithm mode
-                    if not manual_mode:
+                    if evolution_mode:
+                        # Restart evolution with new map
+                        ga.start()
+                        evolution_phase = "evolving"
+                        paused = False
+                        print("\nNew map generated! Evolution restarted!")
+                    elif not manual_mode:
+                        # Generate new chromosome for algorithm mode (mode 2)
                         current_chromosome = ga.random_chromosome()
                         current_actions = ga.chromosome_to_actions(current_chromosome)
                         print(f"\nNew chromosome: {current_chromosome[:30]}...")
@@ -291,11 +331,49 @@ def main():
                     
                     env.render(screen, CELL, assets)
                     pygame.display.flip()
-                    print("New map generated!")
+                    if not evolution_mode:
+                        print("New map generated!")
                     continue
                 
-                # ALGORITHM MODE CONTROLS
-                if not manual_mode:
+                # EVOLUTION MODE CONTROLS
+                if evolution_mode:
+                    # SPACE - Pause/Resume evolution OR step through best path
+                    if e.key == pygame.K_SPACE:
+                        if evolution_phase == "evolving":
+                            paused = not paused
+                            print("Evolution PAUSED" if paused else "Evolution RESUMED")
+                        elif evolution_phase == "showing_best":
+                            # Step through best path manually
+                            if not env.done and action_index < len(current_actions):
+                                action = current_actions[action_index]
+                                reward, done = env.step(action)
+                                action_index += 1
+                                
+                                move_name = ['UP', 'DOWN', 'LEFT', 'RIGHT'][action]
+                                print(f"Move {action_index}: {move_name} | Reward: {reward} | Total: {env.total}")
+                                
+                                env.render(screen, CELL, assets)
+                                pygame.display.flip()
+                                
+                                if done:
+                                    result = "WON!" if reward > 0 else "DIED"
+                                    print(f"\n{result} Final score: {env.total}")
+                    
+                    # F - Toggle fast mode
+                    if e.key == pygame.K_f:
+                        fast_mode = not fast_mode
+                        print(f"Fast mode: {'ON' if fast_mode else 'OFF'}")
+                    
+                    # A - Auto-play best path (when evolution complete)
+                    if e.key == pygame.K_a and evolution_phase == "showing_best":
+                        auto_play = not auto_play
+                        if auto_play:
+                            print("Auto-play enabled! Watching best solution...")
+                        else:
+                            print("Auto-play disabled")
+                
+                # ALGORITHM MODE CONTROLS (mode 2)
+                elif not manual_mode:
                     # SPACE - execute next move from chromosome
                     if e.key == pygame.K_SPACE:
                         if not env.done and action_index < len(current_actions):
@@ -352,8 +430,93 @@ def main():
                             screen.blit(text, text.get_rect(center=(W // 2, H // 2)))
                             pygame.display.flip()
         
-        # Auto-play logic for algorithm mode
-        if not manual_mode and auto_play and not env.done and action_index < len(current_actions):
+        # EVOLUTION MODE - Run evolution
+        if evolution_mode and evolution_phase == "evolving" and not paused:
+            # Run one or more generations
+            gens_to_run = evolution_speed if fast_mode else 1
+            
+            for _ in range(gens_to_run):
+                gen, best_fit, avg_fit, is_complete = ga.evolve_one_generation()
+                
+                if is_complete:
+                    break
+            
+            # Print progress
+            print(f"\rGeneration {gen}/{ga.generations} | Best Fitness: {best_fit} | Avg: {avg_fit:.1f}", end="")
+            
+            # Update display with evolution info
+            env.render(screen, CELL, assets)
+            
+            # Draw evolution overlay
+            font = pygame.font.SysFont(None, 28)
+            overlay_text = f"EVOLVING... Gen: {gen}/{ga.generations} | Best: {best_fit}"
+            text_surf = font.render(overlay_text, True, (255, 255, 0))
+            screen.blit(text_surf, (10, H - 30))
+            
+            pygame.display.flip()
+            
+            # Check if evolution is complete
+            if is_complete:
+                evolution_phase = "showing_best"
+                print(f"\n\n{'='*50}")
+                print("EVOLUTION COMPLETE!")
+                print(f"Best fitness found: {best_fit}")
+                print(f"Best chromosome: {ga.best_chromosome[:30]}...")
+                print(f"{'='*50}")
+                print("\nNow showing the best path found!")
+                print("Controls:")
+                print("  SPACE - Step through moves")
+                print("  A - Auto-play best path")
+                print("  R - Restart evolution")
+                print("  N - New map + restart")
+                
+                # Setup for showing best path
+                env.reset()
+                current_actions = ga.get_best_actions()
+                action_index = 0
+                auto_play = False
+                
+                env.render(screen, CELL, assets)
+                pygame.display.flip()
+            
+            # Small delay to see evolution (not in fast mode)
+            if not fast_mode:
+                pygame.time.delay(50)
+        
+        # EVOLUTION MODE - Show best path (auto-play)
+        if evolution_mode and evolution_phase == "showing_best" and auto_play:
+            if not env.done and action_index < len(current_actions):
+                action = current_actions[action_index]
+                reward, done = env.step(action)
+                action_index += 1
+                
+                move_name = ['UP', 'DOWN', 'LEFT', 'RIGHT'][action]
+                print(f"Move {action_index}: {move_name} | Reward: {reward} | Total: {env.total}")
+                
+                env.render(screen, CELL, assets)
+                pygame.display.flip()
+                
+                if done:
+                    result = "WON!" if reward > 0 else "DIED"
+                    print(f"\n{result} Final score: {env.total}")
+                    auto_play = False
+                    
+                    # Show final overlay
+                    overlay = pygame.Surface((W, H), pygame.SRCALPHA)
+                    overlay.fill((0, 0, 0, 160))
+                    screen.blit(overlay, (0, 0))
+                    font = pygame.font.SysFont(None, 36)
+                    msg = f"Best Solution: {result} Score: {env.total}"
+                    text = font.render(msg, True, (255, 255, 255))
+                    screen.blit(text, text.get_rect(center=(W // 2, H // 2 - 20)))
+                    hint = font.render("(R to restart / N for new map)", True, (200, 200, 200))
+                    screen.blit(hint, hint.get_rect(center=(W // 2, H // 2 + 20)))
+                    pygame.display.flip()
+                
+                pygame.time.delay(300)  # Slower for best path visualization
+        
+        # ALGORITHM MODE (mode 2) - Auto-play logic
+        if not manual_mode and not evolution_mode and auto_play and not env.done and action_index < len(current_actions):
             action = current_actions[action_index]
             reward, done = env.step(action)
             action_index += 1
@@ -369,8 +532,7 @@ def main():
                 print(f"\n{result} Final score: {env.total}")
                 auto_play = False
             
-            # Small delay so you can see the moves
-            pygame.time.delay(200)  # 200ms between moves
+            pygame.time.delay(200)
         
         clock.tick(30)
 
