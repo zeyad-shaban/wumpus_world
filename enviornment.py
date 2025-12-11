@@ -18,18 +18,21 @@ exit_img = "images/exit.png"
 
 
 class WumpusEnv:
-    def __init__(self, w=8, h=8, n_pits=6, n_wumpus=1, seed=None, wumpus_orientation="down"):
+    def __init__(self, w=8, h=8, n_pits=6, n_wumpus=1, seed=None, wumpus_orientation="down", max_steps=100):
         self.w, self.h, self.n_pits, self.n_wumpus = w, h, n_pits, n_wumpus
-        self.rng = random.Random(seed)
         self.wumpus_orientation = wumpus_orientation
+        self.max_steps = max_steps
+        self.step_count = 0
         self.reset()
 
     def reset(self):
+        self.rng = random.Random(42)
         cells = [(r, c) for r in range(self.h) for c in range(self.w)]
         self.rng.shuffle(cells)
         it = iter(cells)
         self.agent = next(it)
         self.gold = next(it)
+        self.step_count = 0
         # place multiple wumpuses (each is (pos, facing))
         self.wumpuses = []
         for _ in range(self.n_wumpus):
@@ -52,23 +55,42 @@ class WumpusEnv:
     def step(self, a):
         if self.done:
             return 0, True
+
+        # increment step counter for each attempted action
+        self.step_count += 1
+
         moves = {0: (-1, 0), 1: (1, 0), 2: (0, -1), 3: (0, 1)}
         dr, dc = moves[a]
         old = self.agent
         nr, nc = old[0] + dr, old[1] + dc
+
+        # out of bounds: still counts as a step
         if not self.inb((nr, nc)):
             self.total += -1
+            # check max steps after this step
+            if self.max_steps is not None and self.step_count >= self.max_steps:
+                self.total += -100  # extra penalty to enforce shutdown
+                self.done = True
+                return -100, True
             return -1, False
+
         self.agent = (nr, nc)
+
         if self.agent == self.gold:
             self.have_gold = True
             self.gold = None
             self.total += 100
+            # check max steps (in case picking gold was the last allowed step)
+            if self.max_steps is not None and self.step_count >= self.max_steps:
+                self.total += -100
+                self.done = True
+                return -100, True
             return 100, False
+
         if self.agent in self.pits:
-            self.total += -100
+            self.total += -1000
             self.done = True
-            return -100, True
+            return -1000, True
 
         # check against each wumpus
         for i, (wpos, wfacing) in enumerate(self.wumpuses):
@@ -79,6 +101,11 @@ class WumpusEnv:
                     # kill this wumpus
                     self.wumpuses.pop(i)
                     self.total += 150
+                    # check max steps
+                    if self.max_steps is not None and self.step_count >= self.max_steps:
+                        self.total += -100
+                        self.done = True
+                        return -100, True
                     return 150, False
                 else:
                     self.total += -100
@@ -89,8 +116,18 @@ class WumpusEnv:
             self.total += 200
             self.done = True
             return 200, True
+
+        # Non-terminal move: small penalty
         self.total += -1
+
+        # If exceeded max steps after this move, terminate with -100
+        if self.max_steps is not None and self.step_count >= self.max_steps:
+            self.total += -100
+            self.done = True
+            return -100, True
+
         return -1, False
+
 
     def get_state(self):
         # return positions list and a dict of facings for easy inspection
