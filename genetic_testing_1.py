@@ -4,7 +4,7 @@
 #lets maximize a function f(x) = x^2 where x is an integer between 0 and 31
 import random
 
-development_mode = False
+development_mode = True
 
 
 def random_chromosome():
