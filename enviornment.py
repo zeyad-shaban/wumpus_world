@@ -26,7 +26,7 @@ class WumpusEnv:
         self.reset()
 
     def reset(self):
-        self.rng = random.Random(42)
+        self.rng = random.Random(32)
         cells = [(r, c) for r in range(self.h) for c in range(self.w)]
         self.rng.shuffle(cells)
         it = iter(cells)
